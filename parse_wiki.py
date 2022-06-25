@@ -60,30 +60,47 @@ class MentionRecord(object):
         self.link = link
         self.left_text = left_text
         self.right_text = u""
-        self.left_text = " ".join(re.findall(r'\w+', left_text)[-5:])
-        self.satisfied_right_context = False
+        left_words = re.findall(r'\w+', left_text)[-5:]
+        self.left_text = " ".join(left_words)
         self.text_len_link = text_len_link
         self.grab_right_text_pos = len(left_text) + 1 + text_len_link
+        self.left_ok = len(left_words) > 3
+        self.right_ok = False
 
     def set_whole_text(self, text):
         # If this is the right text just added then
         # the link is coming again and needs to be cut from text
         self.right_text = text[self.grab_right_text_pos:]
-        words = re.findall(r'\w+', self.right_text)[:5]
-        self.right_text = " ".join(words)
+        right_words = re.findall(r'\w+', self.right_text)[:5]
+        self.right_text = " ".join(right_words)
+        self.right_ok = len(right_words) > 3
 
     def __repr__(self):
         return f"{self.left_text} [{self.link}] {self.right_text}"
 
-    def complete(self):
-        return self.satisfied_right_context
+    def is_complete(self):
+        return self.left_ok and self.right_ok
+
+class EntityRecord(object):
+    def __init__(self, title, text, url):
+        self.title = title
+        text = text.strip()
+        if "." in text:
+            self.text = text[:text.index('.')]
+        else:
+            self.text = text[:20]
+        self.url = url
+
+    def __repr__(self):
+        return f"{self.title}::{self.text}::{self.url}"
 
 
 class BgWikiParser(object):
     """A class for parsing the contents of a Wikinews archive."""
 
     def __init__(self):
-        pass
+        self.mentions_df = pd.DataFrame(columns=['left_context','link_title','link_text','right_context','url','mention_in_page'])
+        self.entities_df = pd.DataFrame(columns=['title','text','url'])
 
     # def __init__(self, tsv_dir, output_dir):
     # self._doc_index_path = os.path.join(tsv_dir, DOCS_TSV)
@@ -93,16 +110,9 @@ class BgWikiParser(object):
 
     def extract_docs(self):
         # , doc_index):
-        """Extract docs from the Wikinews snapshot."""
+        """Extract entities and mentions from the BG Wikipedia snapshot."""
 
-        # if os.path.exists(self._wiki_dir):
-        #     logging.info("Skipping extraction, wiki dir exists: [%s]", self._wiki_dir)
-        #     return
-        # else:
-        #     logging.info("Creating wiki dir: [%s]", self._wiki_dir)
-        #     os.mkdir(self._wiki_dir)
-
-        logging.info("Extracting docs from [%s]", FLAGS.bgwiki_archive)
+        logging.info("Extracting at most [%s] docs from [%s]", FLAGS.max_records, FLAGS.bgwiki_archive)
 
         ns = {"mw": "http://www.mediawiki.org/xml/export-0.10/"}
         # docs_to_parse = set(doc_index["docid"])
@@ -129,58 +139,52 @@ class BgWikiParser(object):
                     root.clear()
                     continue
 
-                # Skip articles that are not from the correct year.
-                # m = re.search(date_re, text_elem.text)
-                # if not m:
-                #     elem.clear()
-                #     root.clear()
-                #     continue
-
                 # Extract the wikitext from the archive.
                 title = elem.find("mw:title", ns).text
                 encoded_title = wiki_encode(title)
                 url = "https://bg.wikipedia.org/wiki/" + encoded_title
                 # encoded_doc = text_elem.text.encode("utf-8")
                 encoded_doc = text_elem.text
-
-                # Find the row for this doc in the doc index.
-                # row = doc_index.loc[url]
-
-                # Remove this doc from the set of remaining docs.
-                # docs_to_parse.remove(row["docid"])
-
-                # Verify that the wikitext is what we expect.
-                # digest = hashlib.sha1(encoded_doc).hexdigest()
-                # assert row[
-                #            "sha1"] == digest, "wikitext checksum failure for: " + title
-
-                # Write the extracted wiki doc to disk for parsing and analysis.
-                # with open(os.path.join(self._wiki_dir, row["docid"]), "wb") as f:
-                #     f.write(encoded_doc)
+                if ":" in title:
+                    logging.info("Skipping page: [%s]", title)
+                    elem.clear()
+                    root.clear()
+                    continue
 
                 # These clear() calls release references to the XML nodes, preventing
                 # unbounded memory consumption while performing streaming XML parsing.
                 elem.clear()
                 root.clear()
-                print('TITLE: ', title)
-                print('URL: ', url)
-                print("DOC:", encoded_doc)
-                print("DOC2:", self._parse_doc(encoded_doc))
+                #print('TITLE: ', title)
+                #print('URL: ', url)
+                #print("DOC:", encoded_doc)
+                (parsed_text, mentions) = self._parse_doc(encoded_doc)
+                #print("DOC2:", parsed_text)
+
+                entity = EntityRecord(title,parsed_text, url)
+                self.entities_df = self.entities_df.append({
+                                        'title': entity.title,
+                                        'text': entity.text,
+                                        'url': entity.url
+                                    }, ignore_index = True)
+
+                mentions = list(filter(lambda x: x.is_complete(), mentions))
+                for m in mentions:
+                    self.mentions_df = self.mentions_df.append({
+                        'left_context':m.left_text,
+                        'link_title':m.link.title,
+                        'link_text':m.link.text,
+                        'right_context':m.right_text,
+                        'mention_in_page': title
+                    }, ignore_index = True)
+
                 counter += 1
                 if counter > FLAGS.max_records:
                     break
 
-        # Verify that all documents from the doc index have been parsed.
-        # assert not docs_to_parse, "Archive missing document(s): " + str(
-        #     docs_to_parse)
-
-    # def load_doc_index(self):
-    #     """Load the doc index dataframe from a TSV file."""
-    #     assert os.path.exists(self._doc_index_path)
-    #
-    #     logging.info("Reading doc index from: [%s]", self._doc_index_path)
-    #     return pd.read_csv(
-    #         self._doc_index_path, sep="\t", encoding="utf-8", index_col="url")
+        # Persist mentions to CSV
+        self.mentions_df.to_csv('mentions.csv')
+        self.entities_df.to_csv('entities.csv')
 
     def _parse_doc(self, wiki_doc):
         mentions = []
@@ -358,11 +362,10 @@ class BgWikiParser(object):
 
         output = output.rstrip() + "\n\n"
 
-        print("Mentions:")
         for m in mentions:
             m.set_whole_text(output)
-            print(repr(m))
-        return output
+            logging.info("Mention:\t[%s]", repr(m))
+        return (output, mentions)
 
     def parse_docs(self, doc_index):
         """Parse files from wiki_dir to populate text_dir."""
