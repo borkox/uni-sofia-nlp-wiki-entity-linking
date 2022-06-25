@@ -33,16 +33,18 @@ flags.DEFINE_string(
 flags.DEFINE_string(
     "output_dir", None,
     "The directory in which to place output files.")
+flags.DEFINE_string(
+    "log_level", 'info',
+    "Granularity of logs.")
 flags.DEFINE_integer(
-    "max_records", 5,
-    "How many records to process.")
+    "max_pages", 5,
+    "How many pages to process.")
 
 FLAGS = flags.FLAGS
 
-DOCS_TSV = "docs.csv"
-MENTIONS_TSV = "mentions.csv"
-WIKI_SUBDIR = "wiki"
-TEXT_SUBDIR = "text"
+MENTIONS_CSV = "mentions.csv"
+ENTITIES_CSV = "entities.csv"
+
 
 
 def wiki_encode(url):
@@ -102,23 +104,13 @@ class BgWikiParser(object):
         self.mentions_df = pd.DataFrame(columns=['left_context','link_title','link_text','right_context','url','mention_in_page'])
         self.entities_df = pd.DataFrame(columns=['title','text','url'])
 
-    # def __init__(self, tsv_dir, output_dir):
-    # self._doc_index_path = os.path.join(tsv_dir, DOCS_TSV)
-    # self._text_dir = os.path.join(output_dir, TEXT_SUBDIR)
-    # self._wiki_dir = os.path.join(output_dir, WIKI_SUBDIR)
-    # self._mention_index_path = os.path.join(tsv_dir, MENTIONS_TSV)
-
     def extract_docs(self):
         # , doc_index):
         """Extract entities and mentions from the BG Wikipedia snapshot."""
-
-        logging.info("Extracting at most [%s] docs from [%s]", FLAGS.max_records, FLAGS.bgwiki_archive)
-
+        logging.info("Extracting at most [%s] docs from [%s]", FLAGS.max_pages, FLAGS.bgwiki_archive)
         ns = {"mw": "http://www.mediawiki.org/xml/export-0.10/"}
-        # docs_to_parse = set(doc_index["docid"])
-        # date_re = re.compile(r"{{date\|(\w*)\s(\d*), " + FLAGS.year + r"}}")
 
-        counter = 0
+        processed_pages = 0
         with open(FLAGS.bgwiki_archive, "rb") as bf:
             # with bz2file.BZ2File(bf) as xf:
             #     parser = et.iterparse(xf)
@@ -178,13 +170,13 @@ class BgWikiParser(object):
                         'mention_in_page': title
                     }, ignore_index = True)
 
-                counter += 1
-                if counter > FLAGS.max_records:
+                processed_pages += 1
+                if processed_pages > FLAGS.max_pages:
                     break
 
         # Persist mentions to CSV
-        self.mentions_df.to_csv('mentions.csv')
-        self.entities_df.to_csv('entities.csv')
+        self.mentions_df.to_csv(MENTIONS_CSV)
+        self.entities_df.to_csv(ENTITIES_CSV)
 
     def _parse_doc(self, wiki_doc):
         mentions = []
@@ -417,24 +409,9 @@ class BgWikiParser(object):
 def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many command-line arguments.")
-
-    # assert os.path.exists(
-    #     FLAGS.output_dir), "Output directory does not exist: " + FLAGS.output_dir
-
-    # tsv_dir = FLAGS.tsv_dir if FLAGS.tsv_dir else os.path.dirname(
-    #     os.path.abspath(inspect.getframeinfo(inspect.currentframe()).filename))
-    # assert os.path.exists(tsv_dir), "TSV directory does not exist: " + tsv_dir
-
+    logging.basicConfig(level=FLAGS.log_level)
     parser = BgWikiParser()
-    # parser = BgWikiParser(tsv_dir, FLAGS.output_dir)
-
-    # doc_index = parser.load_doc_index()
     parser.extract_docs()
-    # parser.extract_docs(doc_index)
-    # parser.parse_docs(doc_index)
-
-    # mention_index = parser.load_mention_index()
-    # parser.verify_mentions(mention_index)
 
 
 if __name__ == "__main__":
