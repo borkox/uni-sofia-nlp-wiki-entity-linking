@@ -39,6 +39,9 @@ flags.DEFINE_string(
 flags.DEFINE_integer(
     "max_pages", 5,
     "How many pages to process.")
+flags.DEFINE_integer(
+    "limit_mentions_per_page", 20,
+    "How many mentions per page to leave, others are ignored.")
 
 FLAGS = flags.FLAGS
 
@@ -81,7 +84,8 @@ class MentionRecord(object):
         return f"{self.left_text} [{self.link}] {self.right_text}"
 
     def is_complete(self):
-        return self.left_ok and self.right_ok
+#         return self.left_ok and self.right_ok
+        return self.right_ok
 
 class EntityRecord(object):
     def __init__(self, title, text, url):
@@ -161,6 +165,10 @@ class BgWikiParser(object):
                                     }, ignore_index = True)
 
                 mentions = list(filter(lambda x: x.is_complete(), mentions))
+                if len(mentions) > FLAGS.limit_mentions_per_page:
+                    logging.info("Limiting mentions from %d to %d", len(mentions), FLAGS.limit_mentions_per_page)
+                    mentions = mentions[:FLAGS.limit_mentions_per_page]
+
                 for m in mentions:
                     self.mentions_df = self.mentions_df.append({
                         'left_context':m.left_text,
@@ -175,8 +183,8 @@ class BgWikiParser(object):
                     break
 
         # Persist mentions to CSV
-        self.mentions_df.to_csv(MENTIONS_CSV)
-        self.entities_df.to_csv(ENTITIES_CSV)
+        self.mentions_df.to_csv(MENTIONS_CSV, index_label='idx')
+        self.entities_df.to_csv(ENTITIES_CSV,  index_label='idx')
 
     def _parse_doc(self, wiki_doc):
         mentions = []
@@ -356,7 +364,7 @@ class BgWikiParser(object):
 
         for m in mentions:
             m.set_whole_text(output)
-            logging.info("Mention:\t[%s]", repr(m))
+            logging.debug("Mention:\t[%s]", repr(m))
         return (output, mentions)
 
     def parse_docs(self, doc_index):
@@ -409,6 +417,7 @@ class BgWikiParser(object):
 def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many command-line arguments.")
+    print("log level:" + FLAGS.log_level)
     logging.basicConfig(level=FLAGS.log_level)
     parser = BgWikiParser()
     parser.extract_docs()
