@@ -3,10 +3,5 @@
 Download BG Wikipedia
 https://dumps.wikimedia.org/bgwiki/20220620/
 
-
-2022-06-21 10:28:17 done All pages, current versions only.
-bgwiki-20220620-pages-meta-current.xml.bz2 438.2 MB
-
-
-2022-06-20 17:28:49 done Articles, templates, media/file descriptions, and primary meta-pages.
+File:
 bgwiki-20220620-pages-articles.xml.bz2 373.8 MB
